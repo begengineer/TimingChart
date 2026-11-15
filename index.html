@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waveform Drawer</title>
+<style>
+:root{--bg:#eef0f3;--fg:#1f2328;--panel:#fff;--border:#d0d7de;--muted:#656d76;--accent:#2563eb;--accent-soft:#dbeafe;--hover:#f1f3f6;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0d1117;--fg:#e6edf3;--panel:#161b22;--border:#30363d;--muted:#8b949e;--accent:#4c8dff;--accent-soft:#1c2b4a;--hover:#1f2630;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:13px/1.45 "Segoe UI","Meiryo UI","Meiryo",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:7px 12px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.grp{display:flex;gap:4px;align-items:center}
+.sep{width:1px;height:24px;background:var(--border)}
+input,select,button,textarea{font:inherit;color:inherit}
+input[type=text],input[type=number],select{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:2px 6px;height:28px;min-width:0}
+input[type=number]{width:64px}
+input[type=color]{width:30px;height:26px;padding:0;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer;flex:none}
+button{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:2px 11px;height:30px;cursor:pointer;white-space:nowrap}
+button:hover:not(:disabled){background:var(--hover)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+button.primary:hover{filter:brightness(1.08);background:var(--accent)}
+.mode{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.mode button{border:none;border-radius:0;height:32px;padding:0 12px;border-right:1px solid var(--border)}
+.mode button:last-child{border-right:none}
+.mode button.on{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.mode kbd{font-size:10px;opacity:.6;margin-left:4px}
+.small{padding:2px 7px;height:26px}
+#hint{background:var(--panel);border-bottom:1px solid var(--border);padding:4px 14px;color:var(--muted);font-size:12px}
+main{flex:1;display:flex;min-height:0}
+#stage{flex:1;overflow:auto;padding:24px;min-width:0}
+#canvasWrap{display:inline-block;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12),0 4px 16px rgba(0,0,0,.06);border-radius:4px}
+#chart{display:block;user-select:none;touch-action:none}
+aside{width:320px;flex:none;background:var(--panel);border-left:1px solid var(--border);overflow:auto;padding:4px 14px 20px}
+aside h3{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 8px}
+.sig{border:1px solid var(--border);border-radius:6px;padding:6px;margin-bottom:6px;display:grid;gap:5px}
+.sig .row{display:flex;gap:4px;align-items:center}
+.sig input[type=text]{flex:1;width:0}
+.sig .row{margin:0}
+.lbl{white-space:nowrap}
+.row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.row>label:first-child{width:96px;color:var(--muted);font-size:12px;flex:none}
+.row input[type=text]{flex:1}
+.lbl{color:var(--muted);font-size:12px}
+.note{color:var(--muted);font-size:12px}
+.selbox{border:1px solid var(--accent);background:var(--accent-soft);border-radius:6px;padding:8px}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2328;color:#fff;padding:9px 16px;border-radius:6px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
+#toast.show{opacity:.95}
+@media (max-width:820px){main{flex-direction:column}aside{width:auto;height:42%;border-left:none;border-top:1px solid var(--border)}#stage{padding:12px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="mode" id="modes">
+    <button data-mode="wave" title="波形を描く">✏️ 波形<kbd>1</kbd></button>
+    <button data-mode="dim" title="時間の寸法線">↔ 寸法線<kbd>2</kbd></button>
+    <button data-mode="arrow" title="因果の矢印">↪ 矢印<kbd>3</kbd></button>
+    <button data-mode="marker" title="縦の区切り線">┆ 区切り線<kbd>4</kbd></button>
+  </div>
+  <div class="grp"><button id="undo" title="元に戻す (Ctrl+Z)">↶</button><button id="redo" title="やり直し (Ctrl+Y)">↷</button></div>
+  <div class="sep"></div>
+  <div class="grp"><button id="newBtn">新規</button><button id="openBtn" title="保存したJSONを開く">開く</button><button id="saveBtn" title="あとで編集できるようJSONで保存">保存</button></div>
+  <div class="sep"></div>
+  <div class="grp">
+    <select id="scale" title="出力解像度"><option value="1">等倍</option><option value="2">2倍</option><option value="3">3倍</option><option value="4">4倍</option></select>
+    <button id="pngBtn">PNG保存</button>
+    <button id="copyBtn" class="primary" title="PowerPointにそのまま貼り付けできます">📋 画像をコピー</button>
+  </div>
+</header>
+<div id="hint"></div>
+<main>
+  <div id="stage"><div id="canvasWrap"><svg id="chart" xmlns="http://www.w3.org/2000/svg"></svg></div></div>
+  <aside id="side"></aside>
+</main>
+<div id="toast"></div>
+<input type="file" id="fileInput" accept=".json" hidden>
+
+<script>
+'use strict';
+const NS = 'http://www.w3.org/2000/svg';
+const FONT = '"Meiryo UI","Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif';
+const PAD = 12, PAD_R = 28;
+const COLORS = ['#1f6feb', '#d1242f', '#1a7f37', '#8250df', '#bf8700', '#0a7d8c', '#57606a'];
+const STORE = 'waveform-drawer-v1';
+const SEL = '#2f81f7';
+const $ = s => document.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 9);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const r3 = v => Math.round(v * 1000) / 1000;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const mctx = document.createElement('canvas').getContext('2d');
+function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600); }
+
+// ------------------------------------------------------------------ 状態
+function digital(name, color, ranges, cells) {
+  const v = Array(cells).fill(0);
+  ranges.forEach(([a, b]) => { for (let i = a; i < b; i++) v[i] = 1; });
+  return {id: uid(), name, type: 'digital', color, h: 60, v};
+}
+function sample() {
+  const c = 24;
+  const s = [digital('IGN', COLORS[0], [[2, 20]], c), digital('Relay', COLORS[1], [[5, 18]], c), digital('Lamp', COLORS[2], [[8, 16]], c),
+    {id: uid(), name: 'Speed', type: 'analog', color: COLORS[3], h: 90, p: [[0, 0], [8, 0], [12, 0.8], [16, 0.8], [20, 0], [24, 0]]}];
+  return {
+    cells: c, cellW: 36, unitPerCell: 10, unit: 'ms', showAxis: false, gridExport: false,
+    lineW: 2.5, font: 16, slant: 0.2, fill: true, bg: 'white', scale: 2,
+    signals: s,
+    markers: [{id: uid(), t: 2, label: 'IGN ON', color: '#6e7781'}, {id: uid(), t: 20, label: 'IGN OFF', color: '#6e7781'}],
+    dims: [{id: uid(), sig: s[2].id, t1: 5, t2: 8, dy: 30, text: '', color: '#24292f'}],
+    arrows: [{id: uid(), from: {sig: s[0].id, t: 2}, to: {sig: s[1].id, t: 5}, text: '', color: '#d1242f'}],
+  };
+}
+function blank() {
+  const c = 20;
+  return {...sample(), cells: c, signals: [digital('Signal_A', COLORS[0], [], c), digital('Signal_B', COLORS[1], [], c)], markers: [], dims: [], arrows: []};
+}
+let state;
+try { state = JSON.parse(localStorage.getItem(STORE)); } catch (e) { state = null; }
+if (!state || !Array.isArray(state.signals)) state = sample();
+let view = {mode: 'wave', sel: null};   // sel: {kind:'dim'|'arrow'|'marker'|'pt', id, i}
+let undoStack = [], redoStack = [], drag = null;
+
+function normalize() {
+  const s = state;
+  s.cells = clamp(Math.round(+s.cells || 20), 1, 400);
+  s.cellW = clamp(+s.cellW || 36, 4, 200);
+  s.font = clamp(+s.font || 16, 8, 48);
+  s.lineW = clamp(+s.lineW || 2.5, 0.5, 10);
+  s.slant = clamp(+s.slant || 0, 0, 0.5);
+  s.unitPerCell = +s.unitPerCell || 0;
+  s.scale = clamp(+s.scale || 2, 1, 4);
+  for (const g of s.signals) {
+    g.h = clamp(+g.h || 60, 24, 400);
+    if (g.type === 'analog') {
+      let p = (g.p || []).map(([t, y]) => [clamp(r3(+t), 0, s.cells), clamp(r3(+y), 0, 1)]);
+      p = p.map((x, i) => [...x, i]).sort((a, b) => a[0] - b[0] || a[2] - b[2]).map(([t, y]) => [t, y]);
+      if (!p.length || p[0][0] > 0) p.unshift([0, p.length ? p[0][1] : 0]);
+      if (p[p.length - 1][0] < s.cells) p.push([s.cells, p[p.length - 1][1]]);
+      g.p = p; delete g.v;
+    } else {
+      g.type = 'digital';
+      const v = (g.v || []).slice(0, s.cells).map(x => x ? 1 : 0);
+      while (v.length < s.cells) v.push(v.length ? v[v.length - 1] : 0);
+      g.v = v; delete g.p;
+    }
+  }
+  const ids = new Set(s.signals.map(g => g.id));
+  s.dims = (s.dims || []).filter(d => ids.has(d.sig));
+  s.arrows = (s.arrows || []).filter(a => ids.has(a.from.sig) && ids.has(a.to.sig));
+  s.markers = s.markers || [];
+}
+const snap = () => JSON.stringify(state);
+function pushUndo() { undoStack.push(snap()); if (undoStack.length > 200) undoStack.shift(); redoStack = []; }
+function undo() { if (!undoStack.length) return; redoStack.push(snap()); state = JSON.parse(undoStack.pop()); view.sel = null; refresh(); }
+function redo() { if (!redoStack.length) return; undoStack.push(snap()); state = JSON.parse(redoStack.pop()); view.sel = null; refresh(); }
+function commit(fn) { pushUndo(); fn(); refresh(); }
+function refresh() { normalize(); render(); renderSide(); $('#undo').disabled = !undoStack.length; $('#redo').disabled = !redoStack.length; try { localStorage.setItem(STORE, snap()); } catch (e) {} }
+
+// ------------------------------------------------------------------ 描画
+function el(tag, a, p) { const e = document.createElementNS(NS, tag); for (const k in a) if (a[k] != null) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
+function text(s, x, y, o, p) {
+  const e = el('text', {x, y, 'text-anchor': o.anchor || 'start', 'dominant-baseline': o.base || 'middle', 'font-size': o.size,
+    'font-weight': o.weight, fill: o.fill || '#24292f', stroke: o.halo ? '#ffffff' : null, 'stroke-width': o.halo ? 4 : null,
+    'stroke-linejoin': o.halo ? 'round' : null, 'paint-order': o.halo ? 'stroke' : null, 'pointer-events': 'none'}, p);
+  e.textContent = s; return e;
+}
+function metrics() {
+  const s = state;
+  mctx.font = `600 ${s.font}px ${FONT}`;
+  const lw = Math.ceil(Math.max(40, ...s.signals.map(g => mctx.measureText(g.name).width)) + 30);
+  const top = s.markers.length ? Math.round(s.font * 0.85 + 22) : 14;
+  let y = top;
+  const lanes = s.signals.map(g => { const l = {sig: g, y, h: g.h}; y += g.h; return l; });
+  const lanesBottom = y;
+  let bottom = y + (s.showAxis ? s.font + 22 : 10);
+  for (const d of s.dims) { const l = lanes.find(l => l.sig.id === d.sig); if (l) bottom = Math.max(bottom, l.y + d.dy + 14); }
+  const x = t => lw + PAD + t * s.cellW;
+  return {lw, top, lanes, lanesBottom, x, W: Math.ceil(x(s.cells) + PAD_R), H: Math.ceil(bottom + 6)};
+}
+function laneGeom(l) { const m = Math.max(8, Math.min(18, l.h * 0.22)); return {hi: l.y + m, lo: l.y + l.h - m}; }
+function analogY(l, v) { const {hi, lo} = laneGeom(l); return lo - v * (lo - hi); }
+function arrowHead(p, x, y, dx, dy, size, color) {
+  const L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+  const bx = x - ux * size, by = y - uy * size, w = size * 0.45;
+  el('polygon', {points: `${x},${y} ${bx - uy * w},${by + ux * w} ${bx + uy * w},${by - ux * w}`, fill: color, 'pointer-events': 'none'}, p);
+}
+function dimLabel(d) {
+  if (d.text) return d.text;
+  if (!state.unitPerCell) return '';
+  return `${r3(Math.abs(d.t2 - d.t1) * state.unitPerCell)}${state.unit}`;
+}
+
+function build(edit) {
+  const s = state, M = metrics(), X = M.x, fs = s.font, as = Math.round(fs * 0.85);
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('xmlns', NS);
+  svg.setAttribute('width', M.W); svg.setAttribute('height', M.H); svg.setAttribute('viewBox', `0 0 ${M.W} ${M.H}`);
+  svg.setAttribute('font-family', FONT);
+  if (edit || s.bg === 'white') el('rect', {x: 0, y: 0, width: M.W, height: M.H, fill: '#ffffff'}, svg);
+  const sel = (k, id) => edit && view.sel && view.sel.kind === k && view.sel.id === id;
+
+  // グリッド
+  if (edit || s.gridExport) {
+    const g = el('g', {'pointer-events': 'none'}, svg), c = edit ? '#e8ebef' : '#e3e6ea';
+    for (let i = 0; i <= s.cells; i++) el('line', {x1: X(i), x2: X(i), y1: M.top, y2: M.lanesBottom, stroke: c, 'stroke-width': 1}, g);
+    M.lanes.forEach(l => el('line', {x1: X(0), x2: X(s.cells), y1: l.y + l.h, y2: l.y + l.h, stroke: c}, g));
+    el('line', {x1: X(0), x2: X(s.cells), y1: M.top, y2: M.top, stroke: c}, g);
+  }
+  // 時間軸
+  if (s.showAxis) {
+    const g = el('g', {'pointer-events': 'none'}, svg), y = M.lanesBottom + 6;
+    el('line', {x1: X(0), x2: X(s.cells), y1: y, y2: y, stroke: '#57606a', 'stroke-width': 1.2}, g);
+    const every = Math.max(1, Math.ceil((fs * 3) / s.cellW));
+    for (let i = 0; i <= s.cells; i++) {
+      el('line', {x1: X(i), x2: X(i), y1: y, y2: y + (i % every ? 3 : 6), stroke: '#57606a'}, g);
+      if (i % every === 0) text(`${r3(i * (s.unitPerCell || 1))}`, X(i), y + 8 + as * 0.55, {anchor: 'middle', size: as * 0.9, fill: '#57606a'}, g);
+    }
+    if (s.unit) text(`[${s.unit}]`, X(s.cells) + 6, y, {size: as * 0.85, fill: '#57606a'}, g);
+  }
+  // 区切り線
+  for (const m of s.markers) {
+    const g = el('g', {}, svg), x = X(m.t);
+    if (sel('marker', m.id)) el('line', {x1: x, x2: x, y1: M.top - 4, y2: M.lanesBottom, stroke: SEL, 'stroke-width': 7, opacity: 0.3}, g);
+    el('line', {x1: x, x2: x, y1: m.label ? M.top - 2 : M.top, y2: M.lanesBottom, stroke: m.color, 'stroke-width': 1.5, 'stroke-dasharray': '6 4', 'pointer-events': 'none'}, g);
+    if (m.label) text(m.label, x, M.top - as * 0.55 - 6, {anchor: 'middle', size: as, fill: m.color, weight: 600, halo: true}, g);
+    if (edit) {
+      el('line', {x1: x, x2: x, y1: 0, y2: M.lanesBottom, stroke: 'transparent', 'stroke-width': 12, 'data-ann': m.id, 'data-kind': 'marker', style: 'cursor:ew-resize'}, g);
+    }
+  }
+  // 信号名
+  M.lanes.forEach(l => text(l.sig.name, 14, l.y + l.h / 2, {size: fs, weight: 600, fill: '#24292f'}, svg));
+  if (edit) M.lanes.forEach(l => el('rect', {x: 0, y: l.y, width: M.lw, height: l.h, fill: 'transparent', 'data-name': l.sig.id, style: 'cursor:text'}, svg));
+
+  // 波形
+  for (const l of M.lanes) {
+    const g = l.sig, {hi, lo} = laneGeom(l), gw = el('g', {'pointer-events': 'none'}, svg);
+    let d = '';
+    if (g.type === 'digital') {
+      const sl = s.slant * s.cellW, yv = v => v ? hi : lo;
+      d = `M${X(0)},${yv(g.v[0])}`;
+      for (let i = 1; i < s.cells; i++) if (g.v[i] !== g.v[i - 1]) d += ` L${X(i) - sl / 2},${yv(g.v[i - 1])} L${X(i) + sl / 2},${yv(g.v[i])}`;
+      d += ` L${X(s.cells)},${yv(g.v[s.cells - 1])}`;
+    } else {
+      d = 'M' + g.p.map(([t, v]) => `${X(t)},${analogY(l, v)}`).join(' L');
+    }
+    if (s.fill) el('path', {d: `${d} L${X(s.cells)},${lo} L${X(0)},${lo} Z`, fill: g.color, 'fill-opacity': 0.12, stroke: 'none'}, gw);
+    el('path', {d, fill: 'none', stroke: g.color, 'stroke-width': s.lineW, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}, gw);
+    if (edit && g.type === 'analog') g.p.forEach(([t, v], i) => {
+      const on = view.sel && view.sel.kind === 'pt' && view.sel.id === g.id && view.sel.i === i;
+      el('circle', {cx: X(t), cy: analogY(l, v), r: on ? 6 : 4.5, fill: on ? g.color : '#ffffff', stroke: g.color, 'stroke-width': 2,
+        'data-pt': g.id, 'data-i': i, style: 'cursor:move'}, svg);
+    });
+  }
+
+  // 寸法線
+  const laneOf = id => M.lanes.find(l => l.sig.id === id);
+  const drawDim = (d, preview) => {
+    const l = laneOf(d.sig); if (!l) return;
+    const y = l.y + d.dy, x1 = X(Math.min(d.t1, d.t2)), x2 = X(Math.max(d.t1, d.t2)), g = el('g', {}, svg), c = d.color;
+    if (sel('dim', d.id)) el('line', {x1, x2, y1: y, y2: y, stroke: SEL, 'stroke-width': 9, opacity: 0.3, 'stroke-linecap': 'round'}, g);
+    const tick = Math.max(7, as * 0.6);
+    el('line', {x1, x2: x1, y1: y - tick, y2: y + tick, stroke: c, 'stroke-width': 1.3}, g);
+    el('line', {x1: x2, x2, y1: y - tick, y2: y + tick, stroke: c, 'stroke-width': 1.3}, g);
+    el('line', {x1, x2, y1: y, y2: y, stroke: c, 'stroke-width': 1.5, 'stroke-dasharray': preview ? '4 3' : null}, g);
+    const ah = Math.min(9, (x2 - x1) / 3);
+    if (ah > 2) { arrowHead(g, x1, y, -1, 0, ah, c); arrowHead(g, x2, y, 1, 0, ah, c); }
+    const lb = dimLabel(d);
+    if (lb) text(lb, (x1 + x2) / 2, y - as * 0.5 - 4, {anchor: 'middle', size: as, fill: c, weight: 600, halo: true}, g);
+    if (edit && !preview) {
+      el('rect', {x: x1, y: y - as - 8, width: Math.max(8, x2 - x1), height: as + 16, fill: 'transparent', 'data-ann': d.id, 'data-kind': 'dim', style: 'cursor:move'}, g);
+      if (sel('dim', d.id)) [[x1, 1], [x2, 2]].forEach(([x, h]) =>
+        el('rect', {x: x - 5, y: y - 5, width: 10, height: 10, fill: '#fff', stroke: SEL, 'stroke-width': 2, 'data-handle': h, 'data-id': d.id, style: 'cursor:ew-resize'}, g));
+    }
+  };
+  s.dims.forEach(d => drawDim(d));
+  // 矢印
+  const drawArrow = (a, preview, cur) => {
+    const lf = laneOf(a.from.sig); if (!lf) return;
+    const x1 = X(a.from.t), y1 = lf.y + lf.h / 2;
+    let x2, y2;
+    if (cur) { x2 = cur.x; y2 = cur.y; } else { const lt = laneOf(a.to.sig); if (!lt) return; x2 = X(a.to.t); y2 = lt.y + lt.h / 2; }
+    const g = el('g', {}, svg), c = a.color, gap = 4;
+    // 起点→(真下/真上)→終点へ水平に入る曲線
+    let ex = x2, ey = y2, dx = x2 - x1, dy = 0;
+    if (Math.abs(dx) < 1) { dx = 0; dy = Math.sign(y2 - y1) || 1; ey = y2 - dy * gap; } else ex = x2 - Math.sign(dx) * gap;
+    const dpath = `M${x1},${y1} Q${x1},${y2} ${ex},${ey}`;
+    if (sel('arrow', a.id)) el('path', {d: dpath, fill: 'none', stroke: SEL, 'stroke-width': 9, opacity: 0.3, 'stroke-linecap': 'round'}, g);
+    el('circle', {cx: x1, cy: y1, r: 3, fill: c, 'pointer-events': 'none'}, g);
+    el('path', {d: dpath, fill: 'none', stroke: c, 'stroke-width': 1.8, 'stroke-dasharray': preview ? '4 3' : null, 'pointer-events': 'none'}, g);
+    arrowHead(g, ex, ey, dx || 0, dy, 10, c);
+    if (a.text) text(a.text, (x1 + ex) / 2 + 6, (y1 + ey) / 2, {size: as, fill: c, weight: 600, halo: true}, g);
+    if (edit && !preview) el('path', {d: dpath, fill: 'none', stroke: 'transparent', 'stroke-width': 14, 'data-ann': a.id, 'data-kind': 'arrow', style: 'cursor:pointer'}, g);
+  };
+  s.arrows.forEach(a => drawArrow(a));
+  // 作成中のプレビュー
+  if (edit && drag) {
+    if (drag.type === 'dimNew' && drag.t2 != null) drawDim({sig: drag.sig, dy: drag.dy, t1: drag.t1, t2: drag.t2, text: '', color: '#24292f'}, true);
+    if (drag.type === 'arrowNew' && drag.cur) drawArrow({from: drag.from, color: '#d1242f'}, true, drag.cur);
+  }
+  return svg;
+}
+
+const chart = $('#chart');
+function render() {
+  const s = build(true);
+  for (const a of ['width', 'height', 'viewBox']) chart.setAttribute(a, s.getAttribute(a));
+  chart.setAttribute('font-family', FONT);
+  chart.replaceChildren(...s.childNodes);
+}
+
+// ------------------------------------------------------------------ マウス操作
+const HINTS = {
+  wave: 'デジタル信号：マスをクリック/ドラッグして High⇔Low を塗り替え。 アナログ信号：クリックで点を追加、点をドラッグで移動、ダブルクリックで削除。 信号名をダブルクリックで名前変更。',
+  dim: '寸法線：始点から終点まで横にドラッグ。ドラッグした高さに線が引かれます。選択して両端の□で長さ調整、本体ドラッグで移動。',
+  arrow: '矢印：原因になる信号の変化点から、結果の信号の変化点までドラッグ。',
+  marker: '区切り線：クリックした位置に縦線を追加。ドラッグで移動、右の欄でラベル（t1、工程名など）を入力。',
+};
+function pt(e) { const r = chart.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; }
+function tAt(M, x) { return (x - M.lw - PAD) / state.cellW; }
+function laneAt(M, y, nearest) {
+  const l = M.lanes.find(l => y >= l.y && y < l.y + l.h);
+  if (l || !nearest || !M.lanes.length) return l;
+  return y < M.top ? M.lanes[0] : M.lanes[M.lanes.length - 1];
+}
+const snapT = (t, e) => e.altKey ? r3(t) : Math.round(t);
+function select(sel) { view.sel = sel; }
+
+chart.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  const M = metrics(), p = pt(e), tg = e.target, t = tAt(M, p.x), s = state;
+  const capture = () => { try { chart.setPointerCapture(e.pointerId); } catch (err) {} };
+  if (tg.dataset.handle) {
+    select({kind: 'dim', id: tg.dataset.id});
+    drag = {type: 'dimEnd', id: tg.dataset.id, end: +tg.dataset.handle, moved: false}; capture(); return;
+  }
+  if (tg.dataset.pt) {
+    select({kind: 'pt', id: tg.dataset.pt, i: +tg.dataset.i});
+    drag = {type: 'pt', sig: tg.dataset.pt, i: +tg.dataset.i, moved: false}; render(); renderSide(); capture(); return;
+  }
+  if (tg.dataset.ann) {
+    const kind = tg.dataset.kind, id = tg.dataset.ann;
+    select({kind, id});
+    if (kind === 'marker') { const m = s.markers.find(m => m.id === id); drag = {type: 'marker', id, t0: t, m0: m.t, moved: false}; }
+    else if (kind === 'dim') { const d = s.dims.find(d => d.id === id); const l = M.lanes.find(l => l.sig.id === d.sig); drag = {type: 'dimMove', id, t0: t, y0: p.y, a: d.t1, b: d.t2, yAbs: l.y + d.dy, moved: false}; }
+    render(); renderSide(); capture(); return;
+  }
+  if (tg.dataset.name) { select(null); render(); renderSide(); return; }
+  if (t < -0.3 || t > s.cells + 0.3) { select(null); render(); renderSide(); return; }
+  const tc = clamp(t, 0, s.cells);
+  if (view.mode === 'wave') {
+    const l = laneAt(M, p.y); if (!l) { select(null); render(); renderSide(); return; }
+    const g = l.sig;
+    pushUndo();
+    if (g.type === 'digital') {
+      const i = clamp(Math.floor(tc), 0, s.cells - 1);
+      drag = {type: 'paint', sig: g.id, i0: i, v: 1 - g.v[i], base: g.v.slice(), moved: true};
+      applyPaint(M, p.x);
+    } else {
+      const {hi, lo} = laneGeom(l);
+      const tq = e.altKey ? r3(tc) : Math.round(tc * 2) / 2;
+      const yq = clamp(e.altKey ? r3((lo - p.y) / (lo - hi)) : Math.round((lo - p.y) / (lo - hi) * 20) / 20, 0, 1);
+      let idx = g.p.findIndex(([pt]) => pt > tq); if (idx < 0) idx = g.p.length - 1; if (idx === 0) idx = 1;
+      g.p.splice(idx, 0, [tq, yq]);
+      select({kind: 'pt', id: g.id, i: idx});
+      drag = {type: 'pt', sig: g.id, i: idx, moved: true};
+    }
+    render(); renderSide(); capture();
+  } else if (view.mode === 'dim') {
+    const l = laneAt(M, p.y, true); if (!l) return;
+    drag = {type: 'dimNew', sig: l.sig.id, dy: Math.round(p.y - l.y), t1: snapT(tc, e), t2: null}; capture();
+  } else if (view.mode === 'arrow') {
+    const l = laneAt(M, p.y); if (!l) return;
+    drag = {type: 'arrowNew', from: {sig: l.sig.id, t: snapT(tc, e)}, cur: null}; capture();
+  } else if (view.mode === 'marker') {
+    pushUndo();
+    const m = {id: uid(), t: snapT(tc, e), label: '', color: '#6e7781'};
+    s.markers.push(m); select({kind: 'marker', id: m.id});
+    drag = {type: 'marker', id: m.id, t0: t, m0: m.t, moved: true};
+    refresh(); capture();
+  }
+});
+function applyPaint(M, x) {
+  const g = state.signals.find(g => g.id === drag.sig); if (!g) return;
+  const i = clamp(Math.floor(tAt(M, x)), 0, state.cells - 1);
+  g.v = drag.base.slice();
+  for (let k = Math.min(i, drag.i0); k <= Math.max(i, drag.i0); k++) g.v[k] = drag.v;
+}
+chart.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const M = metrics(), p = pt(e), t = tAt(M, p.x), s = state;
+  const first = () => { if (!drag.moved) { drag.moved = true; pushUndo(); } };
+  switch (drag.type) {
+    case 'paint': applyPaint(M, p.x); break;
+    case 'pt': {
+      const g = s.signals.find(g => g.id === drag.sig), l = M.lanes.find(l => l.sig.id === drag.sig); if (!g || !l) return;
+      first();
+      const {hi, lo} = laneGeom(l), i = drag.i, last = g.p.length - 1;
+      const y = clamp(e.altKey ? r3((lo - p.y) / (lo - hi)) : Math.round((lo - p.y) / (lo - hi) * 20) / 20, 0, 1);
+      let tq = e.altKey ? r3(t) : Math.round(t * 2) / 2;
+      if (i === 0) tq = 0; else if (i === last) tq = s.cells; else tq = clamp(tq, g.p[i - 1][0], g.p[i + 1][0]);
+      g.p[i] = [tq, y];
+      break;
+    }
+    case 'marker': { first(); const m = s.markers.find(m => m.id === drag.id); if (m) m.t = clamp(snapT(drag.m0 + (t - drag.t0), e), 0, s.cells); break; }
+    case 'dimMove': {
+      const d = s.dims.find(d => d.id === drag.id); if (!d) return;
+      if (!drag.moved && Math.hypot(p.x - (M.x(drag.t0)), p.y - drag.y0) < 3) return;
+      first();
+      const dt = snapT(t - drag.t0, e), len = drag.b - drag.a;
+      const lo = Math.min(drag.a, drag.b), hi = Math.max(drag.a, drag.b);
+      const sh = clamp(dt, -lo, s.cells - hi);
+      d.t1 = r3(drag.a + sh); d.t2 = r3(drag.a + sh + len);
+      const yAbs = drag.yAbs + (p.y - drag.y0), l = laneAt(M, yAbs, true);
+      if (l) { d.sig = l.sig.id; d.dy = Math.round(yAbs - l.y); }
+      break;
+    }
+    case 'dimEnd': { first(); const d = s.dims.find(d => d.id === drag.id); if (d) d[drag.end === 1 ? 't1' : 't2'] = clamp(snapT(t, e), 0, s.cells); break; }
+    case 'dimNew': drag.t2 = clamp(snapT(t, e), 0, s.cells); break;
+    case 'arrowNew': drag.cur = p; break;
+  }
+  render();
+});
+function endDrag(e) {
+  if (!drag) return;
+  const M = metrics(), d = drag; drag = null;
+  if (d.type === 'dimNew') {
+    if (d.t2 != null && d.t2 !== d.t1) {
+      pushUndo();
+      const dim = {id: uid(), sig: d.sig, dy: d.dy, t1: Math.min(d.t1, d.t2), t2: Math.max(d.t1, d.t2), text: '', color: '#24292f'};
+      state.dims.push(dim); select({kind: 'dim', id: dim.id});
+    }
+  } else if (d.type === 'arrowNew' && d.cur && e) {
+    const l = laneAt(M, d.cur.y, true), t2 = clamp(snapT(tAt(M, d.cur.x), e), 0, state.cells);
+    if (l && (l.sig.id !== d.from.sig || t2 !== d.from.t)) {
+      pushUndo();
+      const a = {id: uid(), from: d.from, to: {sig: l.sig.id, t: t2}, text: '', color: '#d1242f'};
+      state.arrows.push(a); select({kind: 'arrow', id: a.id});
+    }
+  }
+  refresh();
+}
+chart.addEventListener('pointerup', endDrag);
+chart.addEventListener('pointercancel', () => { drag = null; render(); });
+chart.addEventListener('dblclick', e => {
+  const tg = e.target;
+  if (tg.dataset.pt) {
+    const g = state.signals.find(g => g.id === tg.dataset.pt), i = +tg.dataset.i;
+    if (g && i > 0 && i < g.p.length - 1) commit(() => { g.p.splice(i, 1); view.sel = null; });
+    return;
+  }
+  if (tg.dataset.name) {
+    const g = state.signals.find(g => g.id === tg.dataset.name); if (!g) return;
+    const n = prompt('信号名', g.name); if (n != null && n.trim()) commit(() => { g.name = n.trim(); });
+    return;
+  }
+  if (tg.dataset.ann) {
+    const kind = tg.dataset.kind, id = tg.dataset.ann;
+    const o = (kind === 'dim' ? state.dims : kind === 'arrow' ? state.arrows : state.markers).find(o => o.id === id); if (!o) return;
+    const key = kind === 'marker' ? 'label' : 'text';
+    const n = prompt(kind === 'dim' ? 'ラベル（空欄なら自動で時間を表示）' : 'ラベル', o[key] || ''); if (n != null) commit(() => { o[key] = n; });
+  }
+});
+function deleteSelected() {
+  const s = view.sel; if (!s) return;
+  commit(() => {
+    if (s.kind === 'dim') state.dims = state.dims.filter(o => o.id !== s.id);
+    else if (s.kind === 'arrow') state.arrows = state.arrows.filter(o => o.id !== s.id);
+    else if (s.kind === 'marker') state.markers = state.markers.filter(o => o.id !== s.id);
+    else if (s.kind === 'pt') { const g = state.signals.find(g => g.id === s.id); if (g && s.i > 0 && s.i < g.p.length - 1) g.p.splice(s.i, 1); }
+    view.sel = null;
+  });
+}
+document.addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
+  const k = e.key.toLowerCase(), c = e.ctrlKey || e.metaKey;
+  if (c && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (c && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+  else if (c && k === 'c') { e.preventDefault(); copyPng(); }
+  else if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSelected(); }
+  else if (k === 'escape') { view.sel = null; render(); renderSide(); }
+  else if (!c && ['1', '2', '3', '4'].includes(k)) setMode(['wave', 'dim', 'arrow', 'marker'][+k - 1]);
+});
+function setMode(m) {
+  view.mode = m;
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  $('#hint').textContent = HINTS[m];
+  chart.style.cursor = m === 'wave' ? 'pointer' : 'crosshair';
+}
+$('#modes').addEventListener('click', e => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
+
+// ------------------------------------------------------------------ サイドパネル
+function renderSide() {
+  const s = state, n = s.signals.length;
+  let selHtml = '<div class="note">チャート上の寸法線・矢印・区切り線・アナログの点をクリックすると、ここで編集できます。</div>';
+  const v = view.sel;
+  const findSel = () => !v ? null : v.kind === 'dim' ? s.dims.find(o => o.id === v.id) : v.kind === 'arrow' ? s.arrows.find(o => o.id === v.id) : v.kind === 'marker' ? s.markers.find(o => o.id === v.id) : s.signals.find(g => g.id === v.id);
+  const o = findSel();
+  if (o) {
+    const nm = {dim: '寸法線', arrow: '矢印', marker: '区切り線', pt: 'アナログの点'}[v.kind];
+    let body = '';
+    if (v.kind === 'dim') body = `<div class="row"><label>ラベル</label><input type="text" data-sel="text" value="${esc(o.text)}" placeholder="自動: ${esc(dimLabel({...o, text: ''})) || '（1マスの時間を設定）'}"></div>
+      <div class="row"><label>色</label><input type="color" data-sel="color" value="${o.color}"></div>
+      <div class="row"><label>区間</label><span class="lbl">${o.t1} 〜 ${o.t2} マス</span></div>`;
+    else if (v.kind === 'arrow') body = `<div class="row"><label>ラベル</label><input type="text" data-sel="text" value="${esc(o.text)}" placeholder="（なし）"></div>
+      <div class="row"><label>色</label><input type="color" data-sel="color" value="${o.color}"></div>`;
+    else if (v.kind === 'marker') body = `<div class="row"><label>ラベル</label><input type="text" data-sel="label" value="${esc(o.label)}" placeholder="例: t1, 起動"></div>
+      <div class="row"><label>色</label><input type="color" data-sel="color" value="${o.color}"></div>`;
+    else if (v.kind === 'pt' && o.p[v.i]) body = `<div class="row"><label>位置 (マス)</label><input type="number" step="0.5" data-sel="pt-t" value="${o.p[v.i][0]}" ${v.i === 0 || v.i === o.p.length - 1 ? 'disabled' : ''}></div>
+      <div class="row"><label>レベル 0〜1</label><input type="number" step="0.05" min="0" max="1" data-sel="pt-y" value="${o.p[v.i][1]}"></div>`;
+    const canDel = v.kind !== 'pt' || (v.i > 0 && v.i < o.p.length - 1);
+    selHtml = `<div class="selbox"><div class="row" style="justify-content:space-between"><b>${nm}</b>${canDel ? '<button class="small" data-act="delSel">削除</button>' : ''}</div>${body}</div>`;
+  }
+  $('#side').innerHTML = `
+    <h3>選択中</h3>${selHtml}
+    <h3>信号</h3>
+    ${s.signals.map((g, i) => `<div class="sig">
+      <div class="row"><input type="color" data-sig="${g.id}" data-f="color" value="${g.color}"><input type="text" data-sig="${g.id}" data-f="name" value="${esc(g.name)}"></div>
+      <div class="row"><select data-sig="${g.id}" data-f="type"><option value="digital"${g.type === 'digital' ? ' selected' : ''}>デジタル</option><option value="analog"${g.type === 'analog' ? ' selected' : ''}>アナログ</option></select>
+        <span class="lbl">高さ</span><input type="number" data-sig="${g.id}" data-f="h" value="${g.h}" step="5" min="24" style="width:56px">
+        <span style="flex:1"></span>
+        <button class="small" data-act="up" data-id="${g.id}" ${i === 0 ? 'disabled' : ''} title="上へ">↑</button><button class="small" data-act="down" data-id="${g.id}" ${i === n - 1 ? 'disabled' : ''} title="下へ">↓</button>
+        ${g.type === 'digital' ? `<button class="small" data-act="invert" data-id="${g.id}" title="High/Low反転">⇅</button>` : ''}
+        <button class="small" data-act="del" data-id="${g.id}" title="削除">✕</button></div></div>`).join('')}
+    <div class="row"><button data-act="addD">＋ デジタル</button><button data-act="addA">＋ アナログ</button></div>
+    <h3>時間軸</h3>
+    <div class="row"><label>マス数</label><input type="number" data-set="cells" value="${s.cells}" min="1" max="400"></div>
+    <div class="row"><label>マスの幅 (px)</label><input type="number" data-set="cellW" value="${s.cellW}" min="4" max="200"></div>
+    <div class="row"><label>1マス =</label><input type="number" data-set="unitPerCell" value="${s.unitPerCell}" step="any" min="0"><input type="text" data-set="unit" value="${esc(s.unit)}" style="width:56px;flex:none" placeholder="ms"></div>
+    <div class="row"><label></label><label><input type="checkbox" data-set="showAxis" ${s.showAxis ? 'checked' : ''}> 時間目盛りを表示</label></div>
+    <h3>見た目</h3>
+    <div class="row"><label>線の太さ</label><input type="number" data-set="lineW" value="${s.lineW}" step="0.5" min="0.5" max="10"></div>
+    <div class="row"><label>文字サイズ</label><input type="number" data-set="font" value="${s.font}" min="8" max="48"></div>
+    <div class="row"><label>エッジの傾き</label><input type="range" data-set="slant" min="0" max="0.5" step="0.05" value="${s.slant}" style="flex:1"></div>
+    <div class="row"><label></label><label><input type="checkbox" data-set="fill" ${s.fill ? 'checked' : ''}> 波形の下を薄く塗る</label></div>
+    <div class="row"><label>背景</label><select data-set="bg"><option value="white"${s.bg === 'white' ? ' selected' : ''}>白</option><option value="transparent"${s.bg === 'transparent' ? ' selected' : ''}>透明</option></select></div>
+    <div class="row"><label></label><label><input type="checkbox" data-set="gridExport" ${s.gridExport ? 'checked' : ''}> 出力画像にもグリッド</label></div>
+    <h3>ヒント</h3>
+    <div class="note">・<b>Alt</b>を押しながら操作するとグリッドに吸着しません<br>・寸法線、矢印、区切り線はダブルクリックでラベル編集、<b>Delete</b>で削除<br>・<b>Ctrl+C</b>でも画像をコピー、<b>Ctrl+Z</b>で元に戻す<br>・作業内容はブラウザに自動保存されます</div>`;
+  $('#scale').value = s.scale;
+}
+$('#side').addEventListener('change', e => {
+  const x = e.target, s = state;
+  const val = x.type === 'checkbox' ? x.checked : x.type === 'number' || x.type === 'range' ? +x.value : x.value;
+  if (x.dataset.set) commit(() => { s[x.dataset.set] = val; });
+  else if (x.dataset.sig) {
+    const g = s.signals.find(g => g.id === x.dataset.sig); if (!g) return;
+    const f = x.dataset.f;
+    commit(() => {
+      if (f === 'type' && val !== g.type) {
+        if (val === 'analog') { g.p = [[0, g.v[0]]]; for (let i = 1; i < s.cells; i++) if (g.v[i] !== g.v[i - 1]) g.p.push([i, g.v[i - 1]], [i, g.v[i]]); g.p.push([s.cells, g.v[s.cells - 1]]); g.h = Math.max(g.h, 80); }
+        else { g.v = Array.from({length: s.cells}, (_, i) => { let y = g.p[0][1]; for (const [t, v] of g.p) if (t <= i + 0.5) y = v; return y >= 0.5 ? 1 : 0; }); g.h = 60; }
+        g.type = val;
+      } else g[f] = val;
+    });
+  } else if (x.dataset.sel) {
+    const v = view.sel, f = x.dataset.sel;
+    commit(() => {
+      if (v.kind === 'pt') {
+        const g = s.signals.find(g => g.id === v.id); if (!g || !g.p[v.i]) return;
+        if (f === 'pt-t') g.p[v.i][0] = clamp(val, g.p[v.i - 1][0], g.p[v.i + 1][0]); else g.p[v.i][1] = clamp(val, 0, 1);
+      } else {
+        const o = (v.kind === 'dim' ? s.dims : v.kind === 'arrow' ? s.arrows : s.markers).find(o => o.id === v.id);
+        if (o) o[f] = val;
+      }
+    });
+  }
+});
+$('#side').addEventListener('input', e => {   // スライダー・色はリアルタイム反映
+  const x = e.target;
+  if (x.type === 'range' && x.dataset.set) { state[x.dataset.set] = +x.value; render(); }
+});
+$('#side').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  const s = state, id = b.dataset.id, i = s.signals.findIndex(g => g.id === id);
+  switch (b.dataset.act) {
+    case 'delSel': deleteSelected(); break;
+    case 'addD': commit(() => s.signals.push(digital(`Signal_${s.signals.length + 1}`, COLORS[s.signals.length % COLORS.length], [], s.cells))); break;
+    case 'addA': commit(() => s.signals.push({id: uid(), name: `Analog_${s.signals.length + 1}`, type: 'analog', color: COLORS[s.signals.length % COLORS.length], h: 90, p: [[0, 0], [s.cells, 0]]})); break;
+    case 'up': case 'down': {
+      const j = b.dataset.act === 'up' ? i - 1 : i + 1;
+      if (i >= 0 && j >= 0 && j < s.signals.length) commit(() => { [s.signals[i], s.signals[j]] = [s.signals[j], s.signals[i]]; });
+      break;
+    }
+    case 'invert': commit(() => { s.signals[i].v = s.signals[i].v.map(v => 1 - v); }); break;
+    case 'del': if (confirm(`「${s.signals[i].name}」を削除しますか？`)) commit(() => { s.signals.splice(i, 1); view.sel = null; }); break;
+  }
+});
+
+// ------------------------------------------------------------------ 出力
+function svgString() { return new XMLSerializer().serializeToString(build(false)); }
+function pngBlob() {
+  return new Promise((resolve, reject) => {
+    const svg = build(false), W = +svg.getAttribute('width'), H = +svg.getAttribute('height'), k = state.scale;
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = Math.round(W * k); cv.height = Math.round(H * k);
+      const ctx = cv.getContext('2d'); ctx.scale(k, k); ctx.drawImage(img, 0, 0);
+      cv.toBlob(b => b ? resolve(b) : reject(new Error('画像を生成できませんでした')), 'image/png');
+    };
+    img.onerror = () => reject(new Error('画像を生成できませんでした'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+  });
+}
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const fileBase = () => 'waveform_' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+async function copyPng() {
+  try {
+    if (!navigator.clipboard || !window.ClipboardItem) throw new Error('このブラウザは画像のコピーに対応していません');
+    await navigator.clipboard.write([new ClipboardItem({'image/png': pngBlob()})]);
+    toast('画像をコピーしました。PowerPoint などに貼り付けできます');
+  } catch (err) { toast('コピーできませんでした：' + err.message + '（PNG保存をお使いください）'); }
+}
+$('#copyBtn').onclick = copyPng;
+$('#pngBtn').onclick = async () => { try { download(await pngBlob(), fileBase() + '.png'); } catch (err) { toast(err.message); } };
+$('#scale').onchange = e => { state.scale = +e.target.value; refresh(); };
+$('#saveBtn').onclick = () => download(new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'}), fileBase() + '.json');
+$('#openBtn').onclick = () => $('#fileInput').click();
+$('#fileInput').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try { const o = JSON.parse(await f.text()); if (!Array.isArray(o.signals)) throw new Error('このツールのファイルではありません'); commit(() => { state = o; view.sel = null; }); toast('読み込みました'); }
+  catch (err) { alert('読み込みに失敗しました：' + err.message); }
+};
+$('#newBtn').onclick = () => { if (confirm('新しく作成しますか？（「元に戻す」で復元できます）')) commit(() => { state = blank(); view.sel = null; }); };
+$('#undo').onclick = undo;
+$('#redo').onclick = redo;
+
+normalize();
+setMode('wave');
+refresh();
+</script>
+</body>
+</html>

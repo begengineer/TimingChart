@@ -1,0 +1,16 @@
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Local work files (exported images and saved charts)
+*.png
+waveform_*.json
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
